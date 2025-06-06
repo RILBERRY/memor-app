@@ -20,7 +20,9 @@ return new class extends Migration
             $table->json('custom_img_path')->nullable();
             $table->text('url_slug')->nullable()->unique();
             $table->json('post_path')->nullable();
-            $table->foreignId('user_id')->constrained();
+            $table->foreignId('user_id')->nullable()->constrained();
+            $table->text('guest_user_id_token')->nullable();
+            $table->json('guest_user_data')->nullable();
             $table->timestamp('published_at')->nullable();
             $table->timestamps();
         });

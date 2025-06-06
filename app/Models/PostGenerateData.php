@@ -11,6 +11,7 @@ class PostGenerateData extends Model
     protected $casts = [
         'post_path' => 'json',
         'custom_img_path' => 'json',
+        'guest_user_data' => 'json',
     ];
 
     public function user()

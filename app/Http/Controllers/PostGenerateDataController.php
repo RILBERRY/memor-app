@@ -6,16 +6,94 @@ use App\Models\Category;
 use App\Models\ImageUrlDict;
 use App\Models\PostGenerateData;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
 
 use Intervention\Image\Drivers\Gd\Driver;
 use Intervention\Image\Geometry\Factories\RectangleFactory;
 use Intervention\Image\ImageManager;
 use Session;
+use Str;
+use Vinkla\Hashids\Facades\Hashids;
 
 class PostGenerateDataController extends Controller
 {
     //
+    public function home(Request $request)
+    {
+        $categories = [
+            // January
+            'new year' => 'New Year’s Day',
+            'orthodox-christmas' => 'Orthodox Christmas',
+            'mlk-day' => 'Martin Luther King Jr. Day',
+
+            // February
+            'valentines-day' => 'Valentine’s Day',
+            'chinese-new-year' => 'Chinese New Year',
+            'ash-wednesday' => 'Ash Wednesday',
+
+            // March
+            'womens-day' => 'International Women’s Day',
+            'st-patricks-day' => 'St. Patrick’s Day',
+            'ramadan-start' => 'Start of Ramadan',
+
+            // April
+            'easter' => 'Easter Sunday',
+            'good-friday' => 'Good Friday',
+            'earth-day' => 'Earth Day',
+
+            // May
+            'labor-day' => 'Labor Day',
+            'mothers-day' => 'Mother’s Day',
+            'eid-al-fitr' => 'Eid al-Fitr',
+
+            // June
+            'fathers-day' => 'Father’s Day',
+            'pride-day' => 'Pride Day',
+            'eid-al-adha' => 'Eid al-Adha',
+
+            // July
+            'independence-day' => 'Independence Day (USA)',
+            'bastille-day' => 'Bastille Day (France)',
+
+            // August
+            'friendship-day' => 'Friendship Day',
+            'hijri-new-year' => 'Islamic New Year',
+
+            // September
+            'teachers-day' => 'Teachers’ Day',
+            'grandparents-day' => 'Grandparents’ Day',
+
+            // October
+            'halloween' => 'Halloween',
+            'navratri' => 'Navratri',
+            'diwali' => 'Diwali',
+
+            // November
+            'all-saints-day' => 'All Saints’ Day',
+            'thanksgiving' => 'Thanksgiving (USA)',
+            'black-friday' => 'Black Friday',
+
+            // December
+            'world-aids-day' => 'World AIDS Day',
+            'hanukkah' => 'Hanukkah',
+            'christmas' => 'Christmas',
+            'new-years-eve' => 'New Year’s Eve',
+        ];
+
+
+        $PostInfor = null;
+        $myCollection = null;
+        if ($request->has('tempkey')) {
+            $tempkey = $request->tempkey;
+            $keyId = implode('', Hashids::decode($tempkey));
+            $id = (int)substr($keyId, 4, -9);
+            $PostInfor = PostGenerateData::with('category')->where('id', $id)->firstOrFail();
+        }else{
+                $myCollection = PostGenerateData::where('user_id', auth()->id())->latest()->get();
+        }
+        return view('welcome', compact('PostInfor', 'categories', 'myCollection'));
+    }
     public function dashboard(Request $request)
     {
         $categories = [
@@ -102,6 +180,80 @@ class PostGenerateDataController extends Controller
     }
 
 
+    public function storeAndCreateNew(Request $request)
+    {
+        $params = $request->validate([
+            'celebration_title' => 'required',
+            'message' => 'nullable',
+            'url_slug' => 'nullable',
+            'post_path' => 'nullable',
+            'published_at' => 'nullable',
+        ]);
+
+        if ($request->hasCookie('guest_user_id_token')) {
+            $params['guest_user_id_token'] = $request->cookie('guest_user_id_token');
+        }else {
+            $guestUserIdToken = bin2hex(random_bytes(16));
+            $params['guest_user_id_token'] = $guestUserIdToken;
+            $cookie = cookie('guest_user_id_token', $guestUserIdToken, 60 * 24 * 365); // 1 year
+            $request->cookies->set('guest_user_id_token', $guestUserIdToken);
+        }
+        if ($request->has('guest_user_data')) {
+            $params['guest_user_data'] = $request->guest_user_data;
+        }else{
+            $userData = [
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'headers' => $request->headers->all(),
+                'timestamp' => now()->toIso8601String()
+            ];
+            $params['guest_user_data'] = $userData;
+        }
+
+        if ($request->hasFile('image')) {
+            $params['custom_img_path'] = [
+                $request->file('image')->store('custom_images', 'public')
+            ];
+        } else {
+            $paramsCategory = $request->validate([
+                'category_name' => 'required',
+                'search_by' => 'required',
+            ]);
+            $existingDict = Category::where('name', $paramsCategory['category_name'])->first();
+            if ($existingDict) {
+                $responsData = $this->getImagesViaApi($paramsCategory['search_by'], $existingDict->page + 1);
+                if ($responsData != null) {
+                    $allImages = array_merge($responsData['images'], $existingDict->custom_img_path);
+                    $existingDict->update([
+                        'custom_img_path' => $allImages,
+                        'page' => $responsData['page']
+                    ]);
+                }
+            } else {
+                $responsData = $this->getImagesViaApi($paramsCategory['search_by']);
+                if ($responsData != null) {
+                    $existingDict = Category::create([
+                        'name' => $paramsCategory['category_name'],
+                        'custom_img_path' => $responsData['images'],
+                        'page' => $responsData['page']
+                    ]);
+                }
+            }
+            $params['category_id'] = $existingDict->id;
+        }
+
+        $params['user_id'] = auth()->id();
+        $PostInfor = PostGenerateData::create($params);
+        if (!empty($PostInfor->custom_img_path)) {
+            $this->generatePost($PostInfor);
+        }
+        $randomPrefix = substr(str_shuffle('0123456789'), 0, 4);
+        $randomSuffix = substr(str_shuffle('0123456789'), 0, 9);
+        $tempkey = $randomPrefix . $PostInfor->id . $randomSuffix;
+        $tempkey = Hashids::encode($tempkey);
+
+        return redirect()->route('home', compact('tempkey'));
+    }
     public function storeAndCreate(Request $request)
     {
         $params = $request->validate([
