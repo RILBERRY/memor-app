@@ -3,6 +3,10 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Category;
+use App\Models\PostGenerateData;
+use Illuminate\Support\Facades\Http;
+
 
 class ImageUrlDictController extends Controller
 {
@@ -14,8 +18,9 @@ class ImageUrlDictController extends Controller
         if (!isset($update['message'])) {
             return response()->json(['error' => 'No message'], 400);
         }
-
+    
         $message = $update['message'];
+        logger()->info('Telegram Update:', $update);
 
         $allowedUsernames = ['a_rilwan'];
 
@@ -38,13 +43,13 @@ class ImageUrlDictController extends Controller
         $messageItems = explode("#", $update['message']['text']);
         $item =  trim($update['message']['text']);
         $post = $this->dataRece($item, $chatId , $botToken);
-      if($post['type'] == "auth"){
+        if($post && $post['type'] == "auth"){
             $reply = ' Total : Records created successfully';
         }
-        if ($post['type'] == "vid") {
+        if ($post && $post['type'] == "vid") {
 
     // Check if file exists
-        if (file_exists($post['vid'])) {
+        if ($post && file_exists($post['vid'])) {
 
             // Determine mime type to check if it's image or video
             $ext = strtolower(pathinfo($post['vid'], PATHINFO_EXTENSION));
@@ -104,19 +109,20 @@ class ImageUrlDictController extends Controller
         if (str_starts_with(strtolower($line), 't-')) {
             $data = substr($line, 2);
             $token = Category::where('name', 'token')->first();
+             $params = [
+                'name'=> 'token',
+                'custom_img_path' => ['auth'=> $data, 'chid' => $chatId,'test' =>$botToken]
+                ];
+                
             if($token){
-                $token->update(['custom_img_path' : ['auth': $data, 'chid' : $chatId] ]);
+                $token->update($params);
 
             }else{
-                $params =[
-                    'name': 'token',
-                    'custom_img_path' : ['auth': $data, 'chid' : $chatId,'test':$botToken]
-                    ]
-                $token = Category::create($param);
+                $token = Category::create($params);
 
             }
 
-            return ['type':"auth"];
+            return ['type'=>"auth"];
         }
 
         if (str_starts_with(strtolower($line), 'v-')) {
@@ -124,8 +130,8 @@ class ImageUrlDictController extends Controller
             $post = PostGenerateData::where('id',$data)->first();
 
             return [
-                "type" : 'vid',
-                "vid" : $post
+                "type" => 'vid',
+                "vid" => $post
             ];
         
         }

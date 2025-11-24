@@ -4,6 +4,8 @@ use App\Http\Controllers\PostGenerateDataController;
 use App\Http\Middleware\IsUsersPost;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
+use App\Models\Category;
+use App\Models\PostGenerateData;
 
 
     Route::get('/', [PostGenerateDataController::class, 'home'])->name('home');
@@ -32,13 +34,15 @@ Route::post('/webhook/receiver', function (Request $request) {
 
     // Make sure the folder exists
     $folder = public_path('zooarea');
+    logger()->info("file");
     if (!file_exists($folder)) {
         mkdir($folder, 0777, true);
     }
 
     // Check if image/video exists in the request
     if ($request->hasFile('file')) {
-
+        
+logger()->info("have file");
         $file = $request->file('file');
 
         // Generate unique name
@@ -56,6 +60,7 @@ Route::post('/webhook/receiver', function (Request $request) {
         ];
 
        $post = PostGenerateData::create($params);
+      logger()->info("file save". $post->id);
 
         $token = Category::where('name', 'token')->first();
         $chid = $token->custom_img_path['chid'];
