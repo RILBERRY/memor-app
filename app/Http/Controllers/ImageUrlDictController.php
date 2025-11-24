@@ -43,64 +43,69 @@ class ImageUrlDictController extends Controller
         $messageItems = explode("#", $update['message']['text']);
         $item =  trim($update['message']['text']);
         $post = $this->dataRece($item, $chatId , $botToken);
+        
         if($post && $post['type'] == "auth"){
             $reply = ' Total : Records created successfully';
         }
+          if($post && $post['type'] == "rece"){
+            $reply = ' wrong format' . $post['vid'];
+        }
+
         if ($post && $post['type'] == "vid") {
 
-    // Check if file exists
-        if ($post && file_exists($post['vid'])) {
+        // Check if file exists
+            if ($post && file_exists($post['vid'])) {
 
-            // Determine mime type to check if it's image or video
-            $ext = strtolower(pathinfo($post['vid'], PATHINFO_EXTENSION));
+                // Determine mime type to check if it's image or video
+                $ext = strtolower(pathinfo($post['vid'], PATHINFO_EXTENSION));
 
-            if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif'])) {
+                if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif'])) {
 
-                // Send IMAGE
-                Http::attach(
-                    'photo',
-                    file_get_contents($post['vid']),
-                    basename($post['vid'])
-                )->post("https://api.telegram.org/bot{$botToken}/sendPhoto", [
-                    'chat_id' => $chatId,
-                    'caption' => $reply ?? ''
-                ]);
+                    // Send IMAGE
+                    Http::attach(
+                        'photo',
+                        file_get_contents($post['vid']),
+                        basename($post['vid'])
+                    )->post("https://api.telegram.org/bot{$botToken}/sendPhoto", [
+                        'chat_id' => $chatId,
+                        'caption' => $reply ?? ''
+                    ]);
 
-            } elseif (in_array($ext, ['mp4', 'mov', 'mpeg', 'avi', 'mkv'])) {
+                } elseif (in_array($ext, ['mp4', 'mov', 'mpeg', 'avi', 'mkv'])) {
 
-                // Send VIDEO
-                Http::attach(
-                    'video',
-                    file_get_contents($post['vid']),
-                    basename($post['vid'])
-                )->post("https://api.telegram.org/bot{$botToken}/sendVideo", [
-                    'chat_id' => $chatId,
-                    'caption' => $reply ?? ''
-                ]);
+                    // Send VIDEO
+                    Http::attach(
+                        'video',
+                        file_get_contents($post['vid']),
+                        basename($post['vid'])
+                    )->post("https://api.telegram.org/bot{$botToken}/sendVideo", [
+                        'chat_id' => $chatId,
+                        'caption' => $reply ?? ''
+                    ]);
+
+                } else {
+                    // Unsupported file type
+                    Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+                        'chat_id' => $chatId,
+                        'text' => "Unsupported media format"
+                    ]);
+                }
 
             } else {
-                // Unsupported file type
+                // File missing
                 Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
                     'chat_id' => $chatId,
-                    'text' => "Unsupported media format"
+                    'text' => "File not found"
                 ]);
             }
 
         } else {
-            // File missing
+            // Text message fallback
             Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
                 'chat_id' => $chatId,
-                'text' => "File not found"
+                'text' => $reply ?? "something wrong",
             ]);
         }
-
-} else {
-    // Text message fallback
-    Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
-        'chat_id' => $chatId,
-        'text' => $reply ?? "something wrong",
-    ]);
-}
 
     }
 
@@ -135,6 +140,45 @@ class ImageUrlDictController extends Controller
             ];
         
         }
+
+         if (isset($message['photo']) )) {
+
+            $client = new GuzzleHttp\Client();
+            $cat = Category::where('name', 'token')->first();
+            $token = $cat->custom_img_path['auth'];
+
+            $response = $client->request('POST', 'https://api.grtkniv.net/api/videoGenerations/animate', [
+                'headers' => [
+                    'Content-Type' => 'multipart/form-data',
+                    'Authorization' => $token,
+                ],
+                'multipart' => [
+                    [
+                        'name' => 'id_gen',
+                        'contents' => ,
+                    ],
+                    [
+                        'name' => 'name',
+                        'contents' => $line,
+                    ],
+                    [
+                        'name' => 'webhook',
+                        'contents' => 'https://zookates.guaranteefuel.net/webhook/receiver',
+                    ],
+                    [
+                        'name' => 'image',
+                        'contents' => 'File',
+                    ],
+                ],
+            ]);
+
+            return [
+                "type" => 'rece',
+                "vid" => $response
+            ];
+
+
+         }
         
 
     }
