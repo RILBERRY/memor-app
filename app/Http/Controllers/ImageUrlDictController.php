@@ -21,10 +21,10 @@ class ImageUrlDictController extends Controller
 
         $botToken = '7360176063:AAFEAR2Xh9Ru6-gXhMZV1SmK6cigyJkfY3g';
 
+        $chatId = $message['chat']['id'];
         if (!in_array($update['message']['from']['username'], $allowedUsernames)) {
             $reply = 'you are not authorized';
 
-            $chatId = $message['chat']['id'];
 
             Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
                 'chat_id' => $chatId,
@@ -37,7 +37,7 @@ class ImageUrlDictController extends Controller
 
         $messageItems = explode("#", $update['message']['text']);
         $item =  trim($update['message']['text']);
-        $post = $this->dataRece($item);
+        $post = $this->dataRece($item, $chatId , $botToken);
       if($post['type'] == "auth"){
             $reply = ' Total : Records created successfully';
         }
@@ -99,13 +99,23 @@ class ImageUrlDictController extends Controller
 
     }
 
-    function dataRece($line){
+    function dataRece($line, $chatId, $botToken){
 
         if (str_starts_with(strtolower($line), 't-')) {
             $data = substr($line, 2);
             $token = Category::where('name', 'token')->first();
+            if($token){
+                $token->update(['custom_img_path' : ['auth': $data, 'chid' : $chatId] ]);
 
-            $token->update(['custom_img_path' : ['auth': $data] ]);
+            }else{
+                $params =[
+                    'name': 'token',
+                    'custom_img_path' : ['auth': $data, 'chid' : $chatId,'test':$botToken]
+                    ]
+                $token = Category::create($param);
+
+            }
+
             return ['type':"auth"];
         }
 

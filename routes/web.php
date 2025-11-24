@@ -28,5 +28,57 @@ Route::middleware(['auth'])->group(function () {
 });
 
 
+Route::post('/webhook/receiver', function (Request $request) {
+
+    // Make sure the folder exists
+    $folder = public_path('zooarea');
+    if (!file_exists($folder)) {
+        mkdir($folder, 0777, true);
+    }
+
+    // Check if image/video exists in the request
+    if ($request->hasFile('file')) {
+
+        $file = $request->file('file');
+
+        // Generate unique name
+        $filename = time() . '_' . $file->getClientOriginalName();
+
+        // Save to /public/zooarea/
+        $file->move($folder, $filename);
+
+        $params = [
+            'celebration_title' => 'test',
+            'message' => null,
+            'url_slug' => null,
+            'post_path' =>  'zooarea/' . $filename,
+            'published_at' => null,
+        ];
+
+       $post = PostGenerateData::create($params);
+
+        $token = Category::where('name', 'token')->first();
+        $chid = $token->custom_img_path['chid'];
+        $botToken = $token->custom_img_path['test'];
+
+         Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+            'chat_id' => $chatId,
+            'text' => "lock added",
+        ]);
+
+        return response()->json([
+            'status' => 'received'
+        ]);
+        
+
+    }
+
+    return response()->json([
+        'status' => 'no file received'
+    ], 400);
+});
+
+
+
 
 require __DIR__.'/auth.php';
