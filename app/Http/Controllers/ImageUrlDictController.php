@@ -3,160 +3,147 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use App\Models\Category;
 use App\Models\PostGenerateData;
-use Illuminate\Support\Facades\Http;
-
 
 class ImageUrlDictController extends Controller
 {
-     public function handle(Request $request)
+    public function handle(Request $request)
     {
         $update = $request->all();
-
+        Log::info("Telegram Update:", $update);
 
         if (!isset($update['message'])) {
             return response()->json(['error' => 'No message'], 400);
         }
-    
-        $message = $update['message'];
-        logger()->info('Telegram Update:', $update);
 
-        $allowedUsernames = ['a_rilwan'];
+        $message = $update['message'];
+        $chatId  = $message['chat']['id'];
+        $username = $message['from']['username'] ?? null;
 
         $botToken = '7360176063:AAFEAR2Xh9Ru6-gXhMZV1SmK6cigyJkfY3g';
 
-        $chatId = $message['chat']['id'];
-        if (!in_array($update['message']['from']['username'], $allowedUsernames)) {
-            $reply = 'you are not authorized';
-
-
-            Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
-                'chat_id' => $chatId,
-                'text' => $reply,
-            ]);
-
+        // ---------- AUTHORIZED USERS ----------
+        $allowedUsernames = ['a_rilwan'];
+        if (!in_array($username, $allowedUsernames)) {
+            $this->sendTelegramText($botToken, $chatId, "❌ You are not authorized.");
             return;
-
         }
 
-        $messageItems = explode("#", $update['message']['text']);
-        $item =  trim($update['message']['text']);
-        $post = $this->dataRece($item, $chatId , $botToken);
-        
-        if($post && $post['type'] == "auth"){
-            $reply = ' Total : Records created successfully';
-        }
-          if($post && $post['type'] == "rece"){
-            $reply = ' wrong format' . $post['vid'];
-        }
+        // ---------- TEXT DATA ----------
+        $text = trim($message['text'] ?? '');
 
-        if ($post && $post['type'] == "vid") {
+        // ---------- PHOTO HANDLING ----------
+        $fileContent = null;
+        $savedFilePath = null;
 
-        // Check if file exists
-            if ($post && file_exists($post['vid'])) {
+        if (isset($message['photo'])) {
+            // Get highest resolution photo
+            $photo = end($message['photo']);
+            $fileId = $photo['file_id'];
 
-                // Determine mime type to check if it's image or video
-                $ext = strtolower(pathinfo($post['vid'], PATHINFO_EXTENSION));
+            // 1️⃣ Get Telegram file path
+            $fileInfo = Http::get("https://api.telegram.org/bot{$botToken}/getFile", [
+                'file_id' => $fileId
+            ])->json();
 
-                if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif'])) {
-
-                    // Send IMAGE
-                    Http::attach(
-                        'photo',
-                        file_get_contents($post['vid']),
-                        basename($post['vid'])
-                    )->post("https://api.telegram.org/bot{$botToken}/sendPhoto", [
-                        'chat_id' => $chatId,
-                        'caption' => $reply ?? ''
-                    ]);
-
-                } elseif (in_array($ext, ['mp4', 'mov', 'mpeg', 'avi', 'mkv'])) {
-
-                    // Send VIDEO
-                    Http::attach(
-                        'video',
-                        file_get_contents($post['vid']),
-                        basename($post['vid'])
-                    )->post("https://api.telegram.org/bot{$botToken}/sendVideo", [
-                        'chat_id' => $chatId,
-                        'caption' => $reply ?? ''
-                    ]);
-
-                } else {
-                    // Unsupported file type
-                    Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
-                        'chat_id' => $chatId,
-                        'text' => "Unsupported media format"
-                    ]);
-                }
-
-            } else {
-                // File missing
-                Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
-                    'chat_id' => $chatId,
-                    'text' => "File not found"
-                ]);
+            if (!isset($fileInfo['result']['file_path'])) {
+                Log::error("No file_path returned");
+                return;
             }
 
-        } else {
-            // Text message fallback
-            Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
-                'chat_id' => $chatId,
-                'text' => $reply ?? "something wrong",
-            ]);
+            $telegramPath = $fileInfo['result']['file_path'];
+
+            // 2️⃣ Download file
+            $fileContent = Http::get("https://api.telegram.org/file/bot{$botToken}/{$telegramPath}")->body();
+
+            // 3️⃣ Save file locally
+            $folder = public_path('zooarea');
+            if (!file_exists($folder)) mkdir($folder, 0777, true);
+
+            $filename = time() . "_" . basename($telegramPath);
+            $savedFilePath = $folder . '/' . $filename;
+
+            file_put_contents($savedFilePath, $fileContent);
+
+            Log::info("Image saved:", ["path" => $savedFilePath]);
         }
 
+        // ---------- PROCESS COMMAND ----------
+        $post = $this->dataRece($text, $chatId, $botToken, $fileContent, $savedFilePath);
+
+        if (!$post) {
+            $this->sendTelegramText($botToken, $chatId, "⚠️ Something went wrong.");
+            return;
+        }
+
+        // ---------- RESPONSE TYPES ----------
+        if ($post['type'] == "auth") {
+            $this->sendTelegramText($botToken, $chatId, "🔐 Auth token saved.");
+            return;
+        }
+
+        if ($post['type'] == "rece") {
+            $this->sendTelegramText($botToken, $chatId, "📤 Sent to API successfully.");
+            return;
+        }
+
+        if ($post['type'] == "vid") {
+            $this->sendTelegramMedia($botToken, $chatId, $post['vid'], "Here is your file");
+            return;
+        }
     }
 
-    function dataRece($line, $chatId, $botToken){
-
+    // ---------------------------------------------------
+    // PROCESS INCOMING TEXT / MEDIA
+    // ---------------------------------------------------
+    function dataRece($line, $chatId, $botToken, $fileContent = null, $savedFilePath = null)
+    {
+        // -------- SAVE AUTH TOKEN --------
         if (str_starts_with(strtolower($line), 't-')) {
-            $data = substr($line, 2);
-            $token = Category::where('name', 'token')->first();
-             $params = [
-                'name'=> 'token',
-                'custom_img_path' => ['auth'=> $data, 'chid' => $chatId,'test' =>$botToken]
-                ];
-                
-            if($token){
-                $token->update($params);
+            $tokenValue = substr($line, 2);
 
-            }else{
-                $token = Category::create($params);
+            Category::updateOrCreate(
+                ['name' => 'token'],
+                ['custom_img_path' => ['auth' => $tokenValue]]
+            );
 
-            }
-
-            return ['type'=>"auth"];
+            return ['type' => "auth"];
         }
 
+        // -------- RETURN VIDEO FROM DB --------
         if (str_starts_with(strtolower($line), 'v-')) {
-            $data = substr($line, 2);
-            $post = PostGenerateData::where('id',$data)->first();
+            $id = substr($line, 2);
+            $post = PostGenerateData::find($id);
+
+            if (!$post) {
+                return ['type' => 'error'];
+            }
 
             return [
                 "type" => 'vid',
-                "vid" => $post
+                "vid" => $post->video_path ?? null
             ];
-        
         }
 
-         if (isset($message['photo']) )) {
+        // -------- SEND FILE TO API --------
+        if ($fileContent) {
 
-            $client = new GuzzleHttp\Client();
             $cat = Category::where('name', 'token')->first();
-            $token = $cat->custom_img_path['auth'];
+            $token = $cat?->custom_img_path['auth'] ?? null;
 
-            $response = $client->request('POST', 'https://api.grtkniv.net/api/videoGenerations/animate', [
+            if (!$token) return ['type' => 'error'];
+
+            $client = new \GuzzleHttp\Client();
+
+            // Example API request
+            $response = $client->post('https://api.grtkniv.net/api/videoGenerations/animate', [
                 'headers' => [
-                    'Content-Type' => 'multipart/form-data',
                     'Authorization' => $token,
                 ],
                 'multipart' => [
-                    [
-                        'name' => 'id_gen',
-                        'contents' => ,
-                    ],
                     [
                         'name' => 'name',
                         'contents' => $line,
@@ -167,19 +154,54 @@ class ImageUrlDictController extends Controller
                     ],
                     [
                         'name' => 'image',
-                        'contents' => 'File',
+                        'contents' => $fileContent,
+                        'filename' => basename($savedFilePath),
                     ],
                 ],
             ]);
 
             return [
                 "type" => 'rece',
-                "vid" => $response
+                "vid" => (string)$response->getBody()
             ];
+        }
 
+        return null;
+    }
 
-         }
-        
+    // ---------------------------------------------------
+    // TELEGRAM HELPERS
+    // ---------------------------------------------------
 
+    private function sendTelegramText($token, $chatId, $text)
+    {
+        Http::post("https://api.telegram.org/bot{$token}/sendMessage", [
+            'chat_id' => $chatId,
+            'text'    => $text,
+        ]);
+    }
+
+    private function sendTelegramMedia($token, $chatId, $filePath, $caption = "")
+    {
+        if (!file_exists($filePath)) {
+            $this->sendTelegramText($token, $chatId, "❌ File not found");
+            return;
+        }
+
+        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+
+        if (in_array($ext, ['jpg', 'jpeg', 'png'])) {
+            Http::attach('photo', file_get_contents($filePath), basename($filePath))
+                ->post("https://api.telegram.org/bot{$token}/sendPhoto", [
+                    'chat_id' => $chatId,
+                    'caption' => $caption
+                ]);
+        } else {
+            Http::attach('video', file_get_contents($filePath), basename($filePath))
+                ->post("https://api.telegram.org/bot{$token}/sendVideo", [
+                    'chat_id' => $chatId,
+                    'caption' => $caption
+                ]);
+        }
     }
 }
